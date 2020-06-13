@@ -56,7 +56,7 @@ impl CertSources {
     pub fn validate_token<T: DeserializeOwned>(&self, token: &str) -> Result<T, Error> {
         let header = decode_header(token)?;
 
-        let kid = header.kid.unwrap();
+        let kid = header.kid.unwrap_or("unknown".to_string());
         let some_key = self.keys.get(&kid);
 
         match some_key {
