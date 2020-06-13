@@ -1,26 +1,16 @@
 use actix_web::client::Client;
 use jsonwebtoken::{errors::Error, errors::ErrorKind, DecodingKey};
-use log::warn;
+use log::{debug, warn};
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::*;
 use openssl::nid::Nid;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
-// 1000 seems like a reasonable maximum number of keys to store
-const CAPACITY: usize = 1000;
-
-#[derive(Debug)]
-struct DecodedKey {
-    key: Option<DecodingKey<'static>>,
-    updated: u64,
-}
-
-lazy_static! {
-    static ref DECODING_KEYS: Mutex<HashMap<String, DecodedKey>> =
-        Mutex::new(HashMap::with_capacity(CAPACITY));
+#[derive(Clone, Debug)]
+pub struct DecodedKey {
+    pub key: Option<DecodingKey<'static>>,
+    pub updated: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,44 +128,45 @@ fn get_ec_key_from_cert(cert: &CertDefinition) -> DecodedKey {
     }
 }
 
-fn insert_keys_from_cert(cert_keys: Certs) -> Vec<String> {
-    let mut inserted_kids = vec![];
-    let mut key_map = DECODING_KEYS.lock().unwrap();
+fn insert_keys_from_cert(cert_keys: Certs) -> Vec<(String, DecodedKey)> {
+    let mut inserted_keys = vec![];
     cert_keys
         .keys
         .iter()
         .for_each(|cert| match cert.kty.as_str() {
             "RSA" => {
-                inserted_kids.push(cert.kid.clone());
-                key_map.insert(cert.kid.clone(), get_rsa_key_from_cert(cert));
+                inserted_keys.push((cert.kid.clone(), get_rsa_key_from_cert(cert)));
             }
             "EC" => {
-                inserted_kids.push(cert.kid.clone());
-                key_map.insert(cert.kid.clone(), get_ec_key_from_cert(cert));
+                inserted_keys.push((cert.kid.clone(), get_ec_key_from_cert(cert)));
             }
             _ => {
                 warn!("Unsupported kty type {}", cert.kty);
-                key_map.insert(
+                inserted_keys.push((
                     cert.kid.clone(),
                     DecodedKey {
                         key: None,
                         updated: now(),
                     },
-                );
+                ));
             }
         });
-    inserted_kids
+    inserted_keys
 }
 
-pub async fn build_source(source: &String) {
+pub async fn build_source(source: &String) -> Result<Vec<(String, DecodedKey)>, Error> {
     let client = Client::default();
-    let response = client.get(source.clone()).send().await;
+    let mut response = client
+        .get(source.clone())
+        .send()
+        .await
+        .map_err(|_e| Error::from(ErrorKind::InvalidSubject))?;
 
-    let cert_keys: Certs = response.unwrap().json().await.unwrap();
-    insert_keys_from_cert(cert_keys);
-}
-
-pub fn debug_keys() {
-    let key_map = DECODING_KEYS.lock().unwrap();
-    println!("{:?}", key_map);
+    let cert_keys: Certs = response
+        .json()
+        .await
+        .map_err(|_e| Error::from(ErrorKind::InvalidSubject))?;
+    let inserted_keys = insert_keys_from_cert(cert_keys);
+    debug!("Inserted keys: {:?}", inserted_keys);
+    Ok(inserted_keys)
 }
