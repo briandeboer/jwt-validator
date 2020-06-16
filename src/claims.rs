@@ -19,7 +19,7 @@ pub struct Claims {
     jti: String,
     locale: Option<String>,
     name: Option<String>,
-    sub: String,
+    pub sub: String,
 }
 
 #[derive(Default)]
