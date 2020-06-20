@@ -1,4 +1,3 @@
-use actix_web::client::Client;
 use jsonwebtoken::{errors::Error, errors::ErrorKind, DecodingKey};
 use log::{debug, warn};
 use openssl::bn::{BigNum, BigNumContext};
@@ -7,10 +6,27 @@ use openssl::nid::Nid;
 use serde::Deserialize;
 use std::time::SystemTime;
 
+const INTERVAL: u64 = 60; // how long do you wait if there was a failure
+
 #[derive(Clone, Debug)]
 pub struct DecodedKey {
     pub key: Option<DecodingKey<'static>>,
     pub updated: u64,
+}
+
+impl DecodedKey {
+    pub fn new() -> Self {
+        DecodedKey {
+            key: None,
+            updated: now(),
+        }
+    }
+}
+
+impl DecodedKey {
+    pub fn should_update(&self) -> bool {
+        now() - self.updated > INTERVAL
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,15 +171,9 @@ fn insert_keys_from_cert(cert_keys: Certs) -> Vec<(String, DecodedKey)> {
 }
 
 pub async fn build_source(source: &String) -> Result<Vec<(String, DecodedKey)>, Error> {
-    let client = Client::default();
-    let mut response = client
-        .get(source.clone())
-        .send()
-        .await
-        .map_err(|_e| Error::from(ErrorKind::InvalidSubject))?;
-
+    let response = surf::get(source.clone());
     let cert_keys: Certs = response
-        .json()
+        .recv_json()
         .await
         .map_err(|_e| Error::from(ErrorKind::InvalidSubject))?;
     let inserted_keys = insert_keys_from_cert(cert_keys);

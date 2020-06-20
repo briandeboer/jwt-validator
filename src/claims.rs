@@ -22,7 +22,7 @@ pub struct Claims {
     pub sub: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TestClaims {
     pub aud: Option<String>,
     pub email: Option<String>,
