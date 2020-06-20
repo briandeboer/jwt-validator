@@ -70,6 +70,11 @@ impl CertSources {
         Ok(true)
     }
 
+    fn insert_placeholder_for_kid(&self, kid: &str) {
+        let mut cert_keys = get_cert_keys();
+        cert_keys.insert(kid.to_string(), DecodedKey::new());
+    }
+
     pub fn validate_token<T: DeserializeOwned + std::fmt::Debug>(
         &self,
         token: &str,
@@ -93,6 +98,7 @@ impl CertSources {
                     if decoded_key.should_update() {
                         info!("Decoded key is checking again - maybe certs need to be updated");
                         // the kid might have been found before but wasn't updated
+                        self.insert_placeholder_for_kid(&kid);
                         task::block_on(async {
                             let _result = self.build_keys().await;
                         });
@@ -112,11 +118,7 @@ impl CertSources {
             None => {
                 // the kid was not found
                 info!("JWT kid {:?} was not found - rechecking certs", &kid);
-                // prevent re-checking for some time in case we can't find the token
-                {
-                    let mut cert_keys = get_cert_keys();
-                    cert_keys.insert(kid.clone(), DecodedKey::new());
-                }
+                self.insert_placeholder_for_kid(&kid);
                 task::block_on(async {
                     let _result = self.build_keys().await;
                 });
